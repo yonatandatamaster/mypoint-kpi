@@ -14,46 +14,75 @@ scan_file = st.sidebar.file_uploader("Upload Scan File (Excel)", type=["xlsx"])
 db_file = st.sidebar.file_uploader("Upload Database File (Excel)", type=["xlsx"])
 
 if scan_file and db_file:
-    # Load sheets
-    df_scan = pd.read_excel(scan_file, sheet_name=None)
-    df_db = pd.read_excel(db_file, sheet_name=None)
+    try:
+        df_scan = pd.read_excel(scan_file, sheet_name=None)
+        df_db = pd.read_excel(db_file, sheet_name=None)
 
-    # Extract first sheet by default
-    df_scan = df_scan[list(df_scan.keys())[0]]
-    df_db = df_db[list(df_db.keys())[0]]
+        df_scan = df_scan[list(df_scan.keys())[0]]
+        df_db = df_db[list(df_db.keys())[0]]
 
-    # Clean columns
-    df_scan['Tanggal Scan'] = pd.to_datetime(df_scan['Tanggal Scan'], errors='coerce')
-    df_scan['Week Number'] = df_scan['Tanggal Scan'].dt.isocalendar().week
-    df_scan['ID Outlet'] = df_scan['ID Outlet'].astype(str).str.strip()
-    df_scan['Kode Program'] = df_scan['Kode Program'].astype(str).str.strip()
+        # Standardize column names
+        df_scan.columns = df_scan.columns.str.strip().str.lower()
+        df_db.columns = df_db.columns.str.strip().str.lower()
 
-    df_db['ID Outlet'] = df_db['ID Outlet'].astype(str).str.strip()
+        # Detect and rename essential columns
+        scan_col_map = {
+            'tanggal scan': 'tanggal_scan',
+            'id outlet': 'id_outlet',
+            'kode program': 'kode_program'
+        }
+        db_col_map = {
+            'id outlet': 'id_outlet',
+            'pic': 'pic',
+            'pic / promotor': 'pic'  # normalize both variations to 'pic'
+        }
+        df_scan = df_scan.rename(columns=scan_col_map)
+        df_db = df_db.rename(columns=db_col_map)
 
-    # Merge
-    df_merged = pd.merge(df_db, df_scan, on='ID Outlet', how='left')
-    df_merged['Is Active'] = df_merged['Tanggal Scan'].notna()
+        # Ensure columns exist
+        required_cols_scan = ['tanggal_scan', 'id_outlet', 'kode_program']
+        required_cols_db = ['id_outlet', 'pic']
 
-    # KPI Summary
-    active_summary = df_merged.groupby(['PIC / Promotor', 'ID Outlet']).agg({'Is Active': 'max'}).reset_index()
-    percent_active = active_summary.groupby('PIC / Promotor')['Is Active'].mean().reset_index()
-    percent_active['% Active Outlets'] = (percent_active['Is Active'] * 100).round(1)
-    percent_active = percent_active.drop(columns=['Is Active'])
+        for col in required_cols_scan:
+            if col not in df_scan.columns:
+                st.error(f"Missing column '{col}' in Scan File")
+                st.stop()
 
-    st.subheader("📌 % Active Outlet by PIC / Promotor")
-    st.dataframe(percent_active, use_container_width=True)
+        for col in required_cols_db:
+            if col not in df_db.columns:
+                st.error(f"Missing column '{col}' in Database File")
+                st.stop()
 
-    # Altair Chart
-    chart = alt.Chart(percent_active).mark_bar().encode(
-        x=alt.X('% Active Outlets', title='% Active Outlets'),
-        y=alt.Y('PIC / Promotor', sort='-x'),
-        tooltip=['PIC / Promotor', '% Active Outlets']
-    ).properties(
-        width=700,
-        height=400,
-        title="% Active Outlets by PIC / Promotor"
-    )
+        df_scan['tanggal_scan'] = pd.to_datetime(df_scan['tanggal_scan'], errors='coerce')
+        df_scan['week_number'] = df_scan['tanggal_scan'].dt.isocalendar().week
+        df_scan['id_outlet'] = df_scan['id_outlet'].astype(str).str.strip()
+        df_scan['kode_program'] = df_scan['kode_program'].astype(str).str.strip()
+        df_db['id_outlet'] = df_db['id_outlet'].astype(str).str.strip()
 
-    st.altair_chart(chart, use_container_width=True)
+        df_merged = pd.merge(df_db, df_scan, on='id_outlet', how='left')
+        df_merged['is_active'] = df_merged['tanggal_scan'].notna()
+
+        active_summary = df_merged.groupby(['pic', 'id_outlet']).agg({'is_active': 'max'}).reset_index()
+        percent_active = active_summary.groupby('pic')['is_active'].mean().reset_index()
+        percent_active['% active outlets'] = (percent_active['is_active'] * 100).round(1)
+        percent_active = percent_active.drop(columns=['is_active'])
+
+        st.subheader("📌 % Active Outlet by PIC / Promotor")
+        st.dataframe(percent_active, use_container_width=True)
+
+        chart = alt.Chart(percent_active).mark_bar().encode(
+            x=alt.X('% active outlets', title='% Active Outlets'),
+            y=alt.Y('pic', sort='-x'),
+            tooltip=['pic', '% active outlets']
+        ).properties(
+            width=700,
+            height=400,
+            title="% Active Outlets by PIC / Promotor"
+        )
+
+        st.altair_chart(chart, use_container_width=True)
+
+    except Exception as e:
+        st.error(f"❌ Something went wrong: {e}")
 else:
     st.info("Please upload both Scan and Database Excel files to begin.")
