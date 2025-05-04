@@ -3,3 +3,4 @@ pandas
 matplotlib
 seaborn
 openpyxl
+altair==4.2.2
