@@ -4,3 +4,4 @@ numpy
 openpyxl
 matplotlib
 seaborn
+altair==5.5.0
