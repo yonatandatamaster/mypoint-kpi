@@ -34,14 +34,15 @@ if scan_file and db_file:
         db_col_map = {
             'id outlet': 'id_outlet',
             'pic': 'pic',
-            'pic / promotor': 'pic'  # normalize both variations to 'pic'
+            'pic / promotor': 'pic',
+            'program': 'program'
         }
         df_scan = df_scan.rename(columns=scan_col_map)
         df_db = df_db.rename(columns=db_col_map)
 
         # Ensure columns exist
         required_cols_scan = ['tanggal_scan', 'id_outlet', 'kode_program']
-        required_cols_db = ['id_outlet', 'pic']
+        required_cols_db = ['id_outlet', 'pic', 'program']
 
         for col in required_cols_scan:
             if col not in df_scan.columns:
@@ -62,6 +63,12 @@ if scan_file and db_file:
         df_merged = pd.merge(df_db, df_scan, on='id_outlet', how='left')
         df_merged['is_active'] = df_merged['tanggal_scan'].notna()
 
+        # --- Program filter widget ---
+        program_options = df_merged['program'].dropna().unique()
+        selected_programs = st.sidebar.multiselect("Filter by Program", sorted(program_options), default=sorted(program_options))
+        df_merged = df_merged[df_merged['program'].isin(selected_programs)]
+
+        # --- KPI calculations ---
         active_summary = df_merged.groupby(['pic', 'id_outlet']).agg({'is_active': 'max'}).reset_index()
         percent_active = active_summary.groupby('pic')['is_active'].mean().reset_index()
         percent_active['% active outlets'] = (percent_active['is_active'] * 100).round(1)
