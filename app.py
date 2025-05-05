@@ -86,6 +86,10 @@ if scan_file and db_file:
 
         st.subheader("📌 Weekly Active % by PIC and Program")
 
+        # Ensure numeric format for all week columns
+        for col in pivot_df.columns[2:]:
+            pivot_df[col] = pd.to_numeric(pivot_df[col], errors='coerce')
+
         def highlight_low(val):
             try:
                 val = float(val)
