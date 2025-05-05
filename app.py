@@ -14,12 +14,14 @@ db_file = st.sidebar.file_uploader("Upload Database File (Excel)", type=["xlsx"]
 
 if scan_file and db_file:
     try:
+        # Read files
         df_scan = pd.read_excel(scan_file, sheet_name=None)
         df_db = pd.read_excel(db_file, sheet_name=None)
 
         df_scan = df_scan[list(df_scan.keys())[0]]
         df_db = df_db[list(df_db.keys())[0]]
 
+        # Normalize column names
         df_scan.columns = df_scan.columns.str.strip().str.lower()
         df_db.columns = df_db.columns.str.strip().str.lower()
 
@@ -30,8 +32,8 @@ if scan_file and db_file:
         }
         db_col_map = {
             'id outlet': 'id_outlet',
-            'pic': 'pic',
             'pic / promotor': 'pic',
+            'pic': 'pic',
             'program': 'program',
             'dso': 'dso'
         }
@@ -52,6 +54,7 @@ if scan_file and db_file:
                 st.error(f"Missing column '{col}' in Database File")
                 st.stop()
 
+        # Prepare columns
         df_scan['tanggal_scan'] = pd.to_datetime(df_scan['tanggal_scan'], errors='coerce')
         df_scan['week_number'] = df_scan['tanggal_scan'].dt.isocalendar().week
         df_scan['id_outlet'] = df_scan['id_outlet'].astype(str).str.strip()
@@ -61,8 +64,9 @@ if scan_file and db_file:
         df_merged = pd.merge(df_db, df_scan, on='id_outlet', how='left')
         df_merged['is_active'] = df_merged['tanggal_scan'].notna()
 
-        # Filter UI
+        # --- Filters ---
         st.sidebar.header("🔍 Additional Filters")
+
         selected_dso = st.sidebar.selectbox("Filter by DSO", options=sorted(df_merged['dso'].dropna().unique()))
         df_filtered = df_merged[df_merged['dso'] == selected_dso]
 
@@ -75,7 +79,7 @@ if scan_file and db_file:
         selected_pics = st.sidebar.multiselect("Select PIC(s)", options=sorted(df_filtered['pic'].dropna().unique()), default=sorted(df_filtered['pic'].dropna().unique()))
         df_filtered = df_filtered[df_filtered['pic'].isin(selected_pics)]
 
-        # Compute active % per week
+        # --- Pivot Table for Weekly Active % ---
         summary = df_filtered.groupby(['pic', 'program', 'week_number'])['is_active'].mean().reset_index()
         summary['% active'] = (summary['is_active'] * 100).round(1)
         pivot_df = summary.pivot_table(index=['pic', 'program'], columns='week_number', values='% active', fill_value=0).reset_index()
@@ -83,36 +87,57 @@ if scan_file and db_file:
         st.subheader("📌 Weekly Active % by PIC and Program")
 
         def highlight_low(val):
-            if isinstance(val, (int, float)) and val < 50:
-                return 'background-color: #ffcccc'
-            return ''
+            try:
+                val = float(val)
+                return 'background-color: #ffcccc' if val < 50 else ''
+            except:
+                return ''
 
         styled_df = pivot_df.style.format("{:.1f}%").applymap(highlight_low, subset=pd.IndexSlice[:, pivot_df.columns[2]:])
         st.dataframe(styled_df, use_container_width=True)
 
-        # Export button
+        # --- Excel Export ---
         towrite = io.BytesIO()
         with pd.ExcelWriter(towrite, engine='xlsxwriter') as writer:
             pivot_df.to_excel(writer, index=False, sheet_name="Weekly KPI")
         st.download_button("📥 Download Excel Report", data=towrite.getvalue(), file_name="weekly_kpi_report.xlsx")
 
-        # Weekly trend line chart
+        # --- Weekly Trend Line Chart ---
         st.subheader("📈 Weekly Active % Trend by PIC")
-        trend_data = summary.copy()
-        chart = alt.Chart(trend_data).mark_line(point=True).encode(
+        chart = alt.Chart(summary).mark_line(point=True).encode(
             x=alt.X('week_number:O', title='Week'),
             y=alt.Y('% active', title='% Active'),
             color='pic',
             tooltip=['pic', 'program', 'week_number', '% active']
-        ).properties(
-            width=800,
-            height=400,
-            title="Active % Trend by PIC"
-        )
-
+        ).properties(width=800, height=400)
         st.altair_chart(chart, use_container_width=True)
+
+        # --- Horizontal Bar Chart (Avg Active %) ---
+        st.subheader("📊 Average Active % by PIC")
+        avg_active = summary.groupby('pic')['% active'].mean().reset_index()
+        avg_active = avg_active.sort_values('% active', ascending=False)
+
+        bar_chart = alt.Chart(avg_active).mark_bar().encode(
+            x=alt.X('% active', title='Avg % Active'),
+            y=alt.Y('pic', sort='-x', title='PIC'),
+            tooltip=['pic', '% active']
+        ).properties(width=700, height=400)
+        st.altair_chart(bar_chart, use_container_width=True)
+
+        # --- Stacked Bar Chart (Program by Week) ---
+        st.subheader("📊 Weekly Active % Distribution by Program")
+        stacked_data = summary.groupby(['program', 'week_number'])['% active'].mean().reset_index()
+
+        stacked_chart = alt.Chart(stacked_data).mark_bar().encode(
+            x=alt.X('week_number:O', title='Week'),
+            y=alt.Y('% active', stack='normalize', title='Normalized Active %'),
+            color='program',
+            tooltip=['program', 'week_number', '% active']
+        ).properties(width=800, height=400)
+        st.altair_chart(stacked_chart, use_container_width=True)
 
     except Exception as e:
         st.error(f"❌ Something went wrong: {e}")
+
 else:
     st.info("Please upload both Scan and Database Excel files to begin.")
