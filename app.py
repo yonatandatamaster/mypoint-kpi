@@ -66,29 +66,40 @@ if scan_file and db_file:
 
         # --- Filters ---
         st.sidebar.header("🔍 Additional Filters")
-
         selected_dso = st.sidebar.selectbox("Filter by DSO", options=sorted(df_merged['dso'].dropna().unique()))
         df_filtered = df_merged[df_merged['dso'] == selected_dso]
 
-        selected_programs = st.sidebar.multiselect("Filter by Program", options=sorted(df_filtered['program'].dropna().unique()), default=sorted(df_filtered['program'].dropna().unique()))
+        selected_programs = st.sidebar.multiselect(
+            "Filter by Program", 
+            options=sorted(df_filtered['program'].dropna().unique()),
+            default=sorted(df_filtered['program'].dropna().unique())
+        )
         df_filtered = df_filtered[df_filtered['program'].isin(selected_programs)]
 
-        selected_weeks = st.sidebar.multiselect("Select Weeks", options=sorted(df_filtered['week_number'].dropna().unique()), default=sorted(df_filtered['week_number'].dropna().unique()))
+        selected_weeks = st.sidebar.multiselect(
+            "Select Weeks",
+            options=sorted(df_filtered['week_number'].dropna().unique()),
+            default=sorted(df_filtered['week_number'].dropna().unique())
+        )
         df_filtered = df_filtered[df_filtered['week_number'].isin(selected_weeks)]
 
-        selected_pics = st.sidebar.multiselect("Select PIC(s)", options=sorted(df_filtered['pic'].dropna().unique()), default=sorted(df_filtered['pic'].dropna().unique()))
+        selected_pics = st.sidebar.multiselect(
+            "Select PIC(s)", 
+            options=sorted(df_filtered['pic'].dropna().unique()),
+            default=sorted(df_filtered['pic'].dropna().unique())
+        )
         df_filtered = df_filtered[df_filtered['pic'].isin(selected_pics)]
 
-        # --- Pivot Table for Weekly Active % ---
+        # --- Pivot Table ---
         summary = df_filtered.groupby(['pic', 'program', 'week_number'])['is_active'].mean().reset_index()
         summary['% active'] = (summary['is_active'] * 100).round(1)
         pivot_df = summary.pivot_table(index=['pic', 'program'], columns='week_number', values='% active', fill_value=0).reset_index()
 
         st.subheader("📌 Weekly Active % by PIC and Program")
 
-        # Ensure numeric format for all week columns
-        for col in pivot_df.columns[2:]:
-            pivot_df[col] = pd.to_numeric(pivot_df[col], errors='coerce')
+        # Fix formatting issue
+        week_cols = pivot_df.columns[2:]
+        pivot_df[week_cols] = pivot_df[week_cols].apply(pd.to_numeric, errors='coerce')
 
         def highlight_low(val):
             try:
@@ -97,7 +108,7 @@ if scan_file and db_file:
             except:
                 return ''
 
-        styled_df = pivot_df.style.format("{:.1f}%").applymap(highlight_low, subset=pd.IndexSlice[:, pivot_df.columns[2]:])
+        styled_df = pivot_df.style.format({col: "{:.1f}%" for col in week_cols}).applymap(highlight_low, subset=pd.IndexSlice[:, week_cols])
         st.dataframe(styled_df, use_container_width=True)
 
         # --- Excel Export ---
@@ -106,7 +117,7 @@ if scan_file and db_file:
             pivot_df.to_excel(writer, index=False, sheet_name="Weekly KPI")
         st.download_button("📥 Download Excel Report", data=towrite.getvalue(), file_name="weekly_kpi_report.xlsx")
 
-        # --- Weekly Trend Line Chart ---
+        # --- Weekly Line Chart ---
         st.subheader("📈 Weekly Active % Trend by PIC")
         chart = alt.Chart(summary).mark_line(point=True).encode(
             x=alt.X('week_number:O', title='Week'),
@@ -116,11 +127,9 @@ if scan_file and db_file:
         ).properties(width=800, height=400)
         st.altair_chart(chart, use_container_width=True)
 
-        # --- Horizontal Bar Chart (Avg Active %) ---
+        # --- Average Bar Chart ---
         st.subheader("📊 Average Active % by PIC")
-        avg_active = summary.groupby('pic')['% active'].mean().reset_index()
-        avg_active = avg_active.sort_values('% active', ascending=False)
-
+        avg_active = summary.groupby('pic')['% active'].mean().reset_index().sort_values('% active', ascending=False)
         bar_chart = alt.Chart(avg_active).mark_bar().encode(
             x=alt.X('% active', title='Avg % Active'),
             y=alt.Y('pic', sort='-x', title='PIC'),
@@ -128,10 +137,9 @@ if scan_file and db_file:
         ).properties(width=700, height=400)
         st.altair_chart(bar_chart, use_container_width=True)
 
-        # --- Stacked Bar Chart (Program by Week) ---
+        # --- Stacked Program Trend ---
         st.subheader("📊 Weekly Active % Distribution by Program")
         stacked_data = summary.groupby(['program', 'week_number'])['% active'].mean().reset_index()
-
         stacked_chart = alt.Chart(stacked_data).mark_bar().encode(
             x=alt.X('week_number:O', title='Week'),
             y=alt.Y('% active', stack='normalize', title='Normalized Active %'),
