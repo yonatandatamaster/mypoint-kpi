@@ -1,7 +1,6 @@
-streamlit==1.18.1
+streamlit
 pandas
 numpy
 openpyxl
-matplotlib
-seaborn
-altair==4.2.2
+xlsxwriter
+altair
