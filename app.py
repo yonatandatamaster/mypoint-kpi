@@ -4,6 +4,7 @@ import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
 import altair as alt
+from io import BytesIO
 
 st.set_page_config(page_title="Outlet KPI Dashboard", layout="wide")
 st.title("📊 MyPoint Outlet KPI Dashboard")
@@ -40,7 +41,7 @@ if scan_file and db_file:
         df_scan = df_scan.rename(columns=scan_col_map)
         df_db = df_db.rename(columns=db_col_map)
 
-        # Ensure required columns
+        # Ensure columns exist
         required_cols_scan = ['tanggal_scan', 'id_outlet', 'kode_program']
         required_cols_db = ['id_outlet', 'pic', 'program']
 
@@ -63,30 +64,64 @@ if scan_file and db_file:
         df_merged = pd.merge(df_db, df_scan, on='id_outlet', how='left')
         df_merged['is_active'] = df_merged['tanggal_scan'].notna()
 
-        # --- Streamlit filter by program ---
-        selected_program = st.sidebar.multiselect("Filter by Program", options=sorted(df_db['program'].dropna().unique()))
-        if selected_program:
-            df_merged = df_merged[df_merged['program'].isin(selected_program)]
+        # Group by minggu, pic, program
+        grouped = df_merged.groupby(['pic', 'program', 'minggu', 'id_outlet']).agg({'is_active': 'max'}).reset_index()
+        weekly = grouped.groupby(['pic', 'program', 'minggu'])['is_active'].mean().reset_index()
+        weekly['active_percent'] = (weekly['is_active'] * 100).round(1)
 
-        # --- Weekly active outlets ---
-        weekly = df_merged.groupby(['pic', 'program', 'minggu', 'id_outlet']).agg({'is_active': 'max'}).reset_index()
-        weekly_summary = weekly.groupby(['pic', 'program', 'minggu']).agg(
-            total_outlet=('id_outlet', 'count'),
-            aktif=('is_active', 'sum')
-        ).reset_index()
-        weekly_summary['% aktif'] = (weekly_summary['aktif'] / weekly_summary['total_outlet'] * 100).round(1).astype(str) + '%'
+        # Pivot table
+        df_pivot = weekly.pivot_table(index=['pic', 'program'], columns='minggu', values='active_percent').reset_index()
 
-        # --- Pivot table like Excel ---
-        pivot_table = weekly_summary.pivot_table(
-            index=['pic', 'program'],
-            columns='minggu',
-            values='% aktif',
-            aggfunc='first',
-            fill_value='0%'
-        ).reset_index()
+        st.subheader(":pushpin: Weekly Active % by PIC and Program")
+        st.dataframe(df_pivot, use_container_width=True)
 
-        st.subheader("📌 Weekly Active % by PIC and Program")
-        st.dataframe(pivot_table, use_container_width=True)
+        # --- Convert to long format for trend visualization ---
+        df_long = df_pivot.melt(id_vars=['pic', 'program'], var_name='minggu', value_name='active_percent')
+        df_long['active_percent'] = df_long['active_percent'].fillna(0)
+
+        # --- Sidebar Filters ---
+        st.sidebar.markdown("### 🔎 Additional Filters")
+        available_programs = sorted(df_long['program'].dropna().unique())
+        selected_programs = st.sidebar.multiselect("Filter by Program", available_programs, default=available_programs)
+
+        available_weeks = sorted(df_long['minggu'].dropna().unique())
+        selected_weeks = st.sidebar.multiselect("Select Weeks", available_weeks, default=available_weeks)
+
+        available_pics = sorted(df_long['pic'].dropna().unique())
+        selected_pics = st.sidebar.multiselect("Select PIC(s)", available_pics, default=available_pics)
+
+        # --- Apply Filters ---
+        df_filtered = df_long[
+            df_long['program'].isin(selected_programs) &
+            df_long['minggu'].isin(selected_weeks) &
+            df_long['pic'].isin(selected_pics)
+        ]
+
+        # --- Line Chart ---
+        st.subheader("📈 Weekly Active % Trend by PIC")
+        line_chart = alt.Chart(df_filtered).mark_line(point=True).encode(
+            x=alt.X('minggu:N', title='Minggu'),
+            y=alt.Y('active_percent:Q', title='% Aktif', scale=alt.Scale(domain=[0, 100])),
+            color='pic:N',
+            tooltip=['pic', 'program', 'minggu', 'active_percent']
+        ).properties(
+            width=800,
+            height=400
+        )
+        st.altair_chart(line_chart, use_container_width=True)
+
+        # --- Download Excel ---
+        def to_excel(df):
+            output = BytesIO()
+            df.to_excel(output, index=False)
+            return output.getvalue()
+
+        st.download_button(
+            label="📅 Download Filtered Data",
+            data=to_excel(df_filtered),
+            file_name="filtered_kpi.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
 
     except Exception as e:
         st.error(f"❌ Something went wrong: {e}")
