@@ -27,7 +27,7 @@ def load_database():
 def load_week_tags():
     week_df = pd.read_excel(WEEK_TAG_FILE)
     week_df.columns = week_df.columns.str.strip().str.lower()
-    week_df = week_df.rename(columns={'tanggal': 'tanggal_scan', 'minggu': 'week_number'})
+    week_df = week_df.rename(columns={'date': 'tanggal_scan', 'week': 'week_number'})
     week_df['tanggal_scan'] = pd.to_datetime(week_df['tanggal_scan'], errors='coerce')
     return week_df
 
