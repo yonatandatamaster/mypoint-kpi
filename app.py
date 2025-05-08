@@ -4,13 +4,12 @@ import numpy as np
 import altair as alt
 import io
 
-st.set_page_config(page_title="Outlet KPI Dashboard", layout="wide")
-
-# Fixed file paths
+# File paths
 DB_FILE = "Master_Database_Outlet.xlsx"
 WEEK_TAG_FILE = "Date_week_tag.xlsx"
 
-# Caching for performance
+st.set_page_config(page_title="Outlet KPI Dashboard", layout="wide")
+
 @st.cache_data
 def load_database():
     df_db = pd.read_excel(DB_FILE)
@@ -32,15 +31,20 @@ def load_week_tags():
     week_df['tanggal_scan'] = pd.to_datetime(week_df['tanggal_scan'], errors='coerce')
     return week_df
 
-# UI: Scan file uploader
-st.sidebar.header("Upload Scan File")
-scan_file = st.sidebar.file_uploader("Upload only the Scan File (.xlsx)", type=["xlsx"])
+def highlight_low(val):
+    try:
+        return 'background-color: #ffcccc' if float(val) < 50 else ''
+    except:
+        return ''
+
+# Upload UI
+st.sidebar.header("📂 Upload Scan File")
+scan_file = st.sidebar.file_uploader("Upload Scan File (.xlsx)", type=["xlsx"])
 
 if scan_file:
     df_db = load_database()
     week_map = load_week_tags()
 
-    # --- Load Scan File ---
     df_scan = pd.read_excel(scan_file, sheet_name=None)
     df_scan = df_scan[list(df_scan.keys())[0]]
     df_scan.columns = df_scan.columns.str.strip().str.lower()
@@ -55,60 +59,50 @@ if scan_file:
     df_scan['id_outlet'] = df_scan['id_outlet'].astype(str).str.strip()
     df_scan['no_hp'] = df_scan['no_hp'].astype(str).str.strip()
 
-    # Map week numbers using external date-week mapping
+    # Merge with week mapping
     df_scan = pd.merge(df_scan, week_map, on='tanggal_scan', how='left')
-
-    # Merge with master database
     df_merged = pd.merge(df_db, df_scan, on='id_outlet', how='left')
     df_merged['is_active'] = df_merged['tanggal_scan'].notna()
 
-    # --- Filters
-    st.sidebar.header("🔍 Additional Filters")
-    selected_dso = st.sidebar.selectbox("Filter by DSO", options=sorted(df_merged['dso'].dropna().unique()))
-    df_merged = df_merged[df_merged['dso'] == selected_dso]
+    # Filters
+    st.sidebar.header("🔍 Filter Data")
+    selected_dso = st.sidebar.selectbox("Filter by DSO", sorted(df_db['dso'].dropna().unique()))
+    df_filtered = df_merged[df_merged['dso'] == selected_dso]
 
-    selected_programs = st.sidebar.multiselect("Filter by Program", options=sorted(df_merged['program'].dropna().unique()), default=sorted(df_merged['program'].dropna().unique()))
-    df_merged = df_merged[df_merged['program'].isin(selected_programs)]
+    selected_programs = st.sidebar.multiselect("Filter by Program", sorted(df_filtered['program'].dropna().unique()), default=sorted(df_filtered['program'].dropna().unique()))
+    df_filtered = df_filtered[df_filtered['program'].isin(selected_programs)]
 
-    all_weeks = sorted(df_merged['week_number'].dropna().unique())
-    selected_weeks = st.sidebar.multiselect("Select Weeks", options=all_weeks, default=all_weeks)
-    df_filtered = df_merged[df_merged['week_number'].isin(selected_weeks)]
+    all_weeks = sorted(df_filtered['week_number'].dropna().unique())
+    selected_weeks = st.sidebar.multiselect("Select Weeks", all_weeks, default=all_weeks)
 
-    selected_pics = st.sidebar.multiselect("Select PIC(s)", options=sorted(df_filtered['pic'].dropna().unique()), default=sorted(df_filtered['pic'].dropna().unique()))
+    selected_pics = st.sidebar.multiselect("Select PIC(s)", sorted(df_filtered['pic'].dropna().unique()), default=sorted(df_filtered['pic'].dropna().unique()))
     df_filtered = df_filtered[df_filtered['pic'].isin(selected_pics)]
 
-    # --- Tabs Layout
+    # Tabs
     tab1, tab2, tab3 = st.tabs(["📊 Dashboard Table", "📈 Trends & Charts", "📋 Multi-Outlet Scans"])
 
     with tab1:
         st.subheader("📌 Weekly Active % by PIC and Program")
 
-        # Total outlets (fixed per PIC + Program)
-        total_outlets = df_db.drop_duplicates(subset=['id_outlet', 'pic', 'program']) \
-            .groupby(['pic', 'program'])['id_outlet'].count().reset_index(name='total_outlets')
+        # Denominator: fixed total outlets
+        total_outlets = df_filtered.drop_duplicates(subset=['id_outlet', 'pic', 'program']) \
+            .groupby(['pic', 'program'])['id_outlet'].nunique().reset_index(name='total_outlets')
 
-        # Active count per week
-        active_counts = df_filtered[df_filtered['is_active']].drop_duplicates(subset=['id_outlet', 'week_number']) \
+        # Filter weeks only for numerator
+        df_weeks = df_filtered[df_filtered['week_number'].isin(selected_weeks)]
+        active_counts = df_weeks[df_weeks['is_active']].drop_duplicates(subset=['id_outlet', 'week_number']) \
             .groupby(['pic', 'program', 'week_number'])['id_outlet'].count().reset_index(name='active_count')
 
-        # Merge to calculate %
         merged = pd.merge(active_counts, total_outlets, on=['pic', 'program'], how='left')
         merged['% active'] = (merged['active_count'] / merged['total_outlets'] * 100).round(1)
 
         pivot_df = merged.pivot_table(index=['pic', 'program'], columns='week_number', values='% active', fill_value=0).reset_index()
 
-        def highlight_low(val):
-            try:
-                return 'background-color: #ffcccc' if float(val) < 50 else ''
-            except:
-                return ''
-
         styled_df = pivot_df.style.format({col: "{:.1f}%" for col in pivot_df.columns[2:]}) \
             .applymap(highlight_low, subset=pd.IndexSlice[:, pivot_df.columns[2:]])
-
         st.dataframe(styled_df, use_container_width=True)
 
-        # Export button
+        # Export
         towrite = io.BytesIO()
         with pd.ExcelWriter(towrite, engine='xlsxwriter') as writer:
             pivot_df.to_excel(writer, index=False, sheet_name="Weekly KPI")
@@ -125,8 +119,8 @@ if scan_file:
         st.altair_chart(chart, use_container_width=True)
 
         st.subheader("📊 Avg % Active by PIC")
-        avg_df = merged.groupby('pic')['% active'].mean().reset_index().sort_values('% active', ascending=False)
-        bar_chart = alt.Chart(avg_df).mark_bar().encode(
+        avg_active = merged.groupby('pic')['% active'].mean().reset_index().sort_values('% active', ascending=False)
+        bar_chart = alt.Chart(avg_active).mark_bar().encode(
             x=alt.X('% active', title='Average % Active'),
             y=alt.Y('pic', sort='-x'),
             tooltip=['pic', '% active']
@@ -135,11 +129,11 @@ if scan_file:
 
     with tab3:
         st.subheader("📋 Phone Numbers Scanning in Multiple Outlets")
-        df_valid = df_filtered[df_filtered['no_hp'].notna()]
+        df_valid = df_weeks[df_weeks['no_hp'].notna()]
         phone_outlets = df_valid.groupby('no_hp')['id_outlet'].nunique().reset_index(name='unique_outlets')
         multi = phone_outlets[phone_outlets['unique_outlets'] > 1].sort_values(by='unique_outlets', ascending=False)
-        merged_multi = pd.merge(multi, df_filtered[['no_hp', 'id_outlet']].drop_duplicates(), on='no_hp', how='left')
+        merged_multi = pd.merge(multi, df_weeks[['no_hp', 'id_outlet']].drop_duplicates(), on='no_hp', how='left')
         st.dataframe(merged_multi, use_container_width=True)
 
 else:
-    st.info("📂 Please upload the Scan File (.xlsx) to begin.")
+    st.info("📂 Please upload a Scan File to begin.")
