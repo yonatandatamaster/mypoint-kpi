@@ -3,96 +3,96 @@ import pandas as pd
 import numpy as np
 import altair as alt
 import io
-from datetime import datetime
 
 st.set_page_config(page_title="Outlet KPI Dashboard", layout="wide")
 
-# --- Built-in week mapping (based on your Date_week_tag.xlsx) ---
-WEEK_MAP = {
-    '2025-04-28': 18, '2025-04-29': 18, '2025-04-30': 18,
-    '2025-05-01': 18, '2025-05-02': 18, '2025-05-03': 18, '2025-05-04': 18,
-    '2025-05-05': 19, '2025-05-06': 19, '2025-05-07': 19,
-    '2025-05-08': 19, '2025-05-09': 19, '2025-05-10': 19, '2025-05-11': 19,
-    # Add more dates here if needed
-}
-
-# --- Fixed master database file name ---
+# --- Constants ---
 DB_FILE = "Master_Database_Outlet.xlsx"
+WEEK_TAG_FILE = "Date_week_tag.xlsx"
 
 @st.cache_data
-def load_data(scan_file):
-    # Load Scan & DB
-    df_scan = pd.read_excel(scan_file, sheet_name=None)
-    df_db = pd.read_excel(DB_FILE, sheet_name=None)
-
-    df_scan = df_scan[list(df_scan.keys())[0]]
-    df_db = df_db[list(df_db.keys())[0]]
-
-    # Standardize column names
-    df_scan.columns = df_scan.columns.str.strip().str.lower()
+def load_database():
+    df_db = pd.read_excel(DB_FILE)
     df_db.columns = df_db.columns.str.strip().str.lower()
-
-    # Rename if needed
-    df_scan = df_scan.rename(columns={
-        'tanggal scan': 'tanggal_scan',
-        'id outlet': 'id_outlet',
-        'kode program': 'kode_program',
-        'no wa': 'no_hp'
-    })
     df_db = df_db.rename(columns={
         'id outlet': 'id_outlet',
         'pic / promotor': 'pic',
         'program': 'program',
         'dso': 'dso'
     })
-
-    # Preprocess
-    df_scan['tanggal_scan'] = pd.to_datetime(df_scan['tanggal_scan'], errors='coerce')
-    df_scan['week_number'] = df_scan['tanggal_scan'].dt.strftime('%Y-%m-%d').map(WEEK_MAP)
-    df_scan['id_outlet'] = df_scan['id_outlet'].astype(str).str.strip()
-    df_scan['no_hp'] = df_scan['no_hp'].astype(str).str.strip()
     df_db['id_outlet'] = df_db['id_outlet'].astype(str).str.strip()
+    return df_db
 
-    # Merge
-    df_merged = pd.merge(df_db, df_scan, on='id_outlet', how='left')
-    df_merged['is_active'] = df_merged['tanggal_scan'].notna()
+@st.cache_data
+def load_week_tags():
+    week_df = pd.read_excel(WEEK_TAG_FILE)
+    week_df.columns = week_df.columns.str.strip().str.lower()
+    week_df = week_df.rename(columns={'tanggal': 'tanggal_scan', 'minggu': 'week_number'})
+    week_df['tanggal_scan'] = pd.to_datetime(week_df['tanggal_scan'], errors='coerce')
+    return week_df
 
-    return df_merged
+def highlight_low(val):
+    try:
+        return 'background-color: #ffcccc' if float(val) < 50 else ''
+    except:
+        return ''
 
-# --- Upload section ---
-st.sidebar.header("📂 Upload Scan File")
+# --- Sidebar Upload ---
+st.sidebar.header("Upload Scan File")
 scan_file = st.sidebar.file_uploader("Upload only the Scan File (.xlsx)", type=["xlsx"])
 
 if scan_file:
-    df = load_data(scan_file)
+    df_db = load_database()
+    week_map = load_week_tags()
 
-    # --- Filters
+    # --- Load Scan File ---
+    df_scan = pd.read_excel(scan_file, sheet_name=None)
+    df_scan = df_scan[list(df_scan.keys())[0]]  # use first sheet
+    df_scan.columns = df_scan.columns.str.strip().str.lower()
+    df_scan = df_scan.rename(columns={
+        'tanggal scan': 'tanggal_scan',
+        'id outlet': 'id_outlet',
+        'kode program': 'kode_program',
+        'no wa': 'no_hp'
+    })
+
+    df_scan['tanggal_scan'] = pd.to_datetime(df_scan['tanggal_scan'], errors='coerce')
+    df_scan['id_outlet'] = df_scan['id_outlet'].astype(str).str.strip()
+    df_scan['no_hp'] = df_scan['no_hp'].astype(str).str.strip()
+
+    # --- Merge with Week Mapping ---
+    df_scan = pd.merge(df_scan, week_map, on='tanggal_scan', how='left')
+    df_scan = df_scan.dropna(subset=['week_number'])
+
+    # --- Merge with Master DB ---
+    df_merged = pd.merge(df_db, df_scan, on='id_outlet', how='left')
+    df_merged['is_active'] = df_merged['tanggal_scan'].notna()
+
+    # --- Filters ---
     st.sidebar.header("🔍 Additional Filters")
-    selected_dso = st.sidebar.selectbox("Filter by DSO", options=sorted(df['dso'].dropna().unique()))
-    df = df[df['dso'] == selected_dso]
+    selected_dso = st.sidebar.selectbox("Filter by DSO", options=sorted(df_merged['dso'].dropna().unique()))
+    df_filtered = df_merged[df_merged['dso'] == selected_dso]
 
-    selected_programs = st.sidebar.multiselect("Filter by Program", options=sorted(df['program'].dropna().unique()), default=sorted(df['program'].dropna().unique()))
-    df = df[df['program'].isin(selected_programs)]
+    selected_programs = st.sidebar.multiselect("Filter by Program", options=sorted(df_filtered['program'].dropna().unique()), default=sorted(df_filtered['program'].dropna().unique()))
+    df_filtered = df_filtered[df_filtered['program'].isin(selected_programs)]
 
-    all_weeks = sorted(df['week_number'].dropna().unique())
+    all_weeks = sorted(df_filtered['week_number'].dropna().unique())
     selected_weeks = st.sidebar.multiselect("Select Weeks", options=all_weeks, default=all_weeks)
-    df = df[df['week_number'].isin(selected_weeks)]
+    df_filtered = df_filtered[df_filtered['week_number'].isin(selected_weeks)]
 
-    selected_pics = st.sidebar.multiselect("Select PIC(s)", options=sorted(df['pic'].dropna().unique()), default=sorted(df['pic'].dropna().unique()))
-    df = df[df['pic'].isin(selected_pics)]
+    selected_pics = st.sidebar.multiselect("Select PIC(s)", options=sorted(df_filtered['pic'].dropna().unique()), default=sorted(df_filtered['pic'].dropna().unique()))
+    df_filtered = df_filtered[df_filtered['pic'].isin(selected_pics)]
 
-    # --- Tabs
+    # --- Tabs ---
     tab1, tab2, tab3 = st.tabs(["📊 Dashboard Table", "📈 Trends & Charts", "📋 Multi-Outlet Scans"])
 
     with tab1:
         st.subheader("📌 Weekly Active % by PIC and Program")
 
-        # Total outlets per PIC/Program
-        total_outlets = df.drop_duplicates(subset=['id_outlet', 'pic', 'program']) \
+        total_outlets = df_filtered.drop_duplicates(subset=['id_outlet', 'pic', 'program']) \
             .groupby(['pic', 'program'])['id_outlet'].count().reset_index(name='total_outlets')
 
-        # Weekly active scan count (distinct outlet+week)
-        active_weekly = df[df['is_active']].drop_duplicates(subset=['id_outlet', 'week_number']) \
+        active_weekly = df_filtered[df_filtered['is_active']].drop_duplicates(subset=['id_outlet', 'week_number']) \
             .groupby(['pic', 'program', 'week_number'])['id_outlet'].count().reset_index(name='active_count')
 
         merged = pd.merge(active_weekly, total_outlets, on=['pic', 'program'], how='left')
@@ -100,18 +100,11 @@ if scan_file:
 
         pivot_df = merged.pivot_table(index=['pic', 'program'], columns='week_number', values='% active', fill_value=0).reset_index()
 
-        def highlight_low(val):
-            try:
-                return 'background-color: #ffcccc' if float(val) < 50 else ''
-            except:
-                return ''
-
         styled_df = pivot_df.style.format({col: "{:.1f}%" for col in pivot_df.columns[2:]}) \
             .applymap(highlight_low, subset=pd.IndexSlice[:, pivot_df.columns[2:]])
 
         st.dataframe(styled_df, use_container_width=True)
 
-        # Export button
         towrite = io.BytesIO()
         with pd.ExcelWriter(towrite, engine='xlsxwriter') as writer:
             pivot_df.to_excel(writer, index=False, sheet_name="Weekly KPI")
@@ -138,10 +131,10 @@ if scan_file:
 
     with tab3:
         st.subheader("📋 Phone Numbers Scanning in Multiple Outlets")
-        df_valid = df[df['no_hp'].notna()]
+        df_valid = df_filtered[df_filtered['no_hp'].notna()]
         phone_outlets = df_valid.groupby('no_hp')['id_outlet'].nunique().reset_index(name='unique_outlets')
         multi = phone_outlets[phone_outlets['unique_outlets'] > 1].sort_values(by='unique_outlets', ascending=False)
-        merged_multi = pd.merge(multi, df[['no_hp', 'id_outlet']].drop_duplicates(), on='no_hp', how='left')
+        merged_multi = pd.merge(multi, df_filtered[['no_hp', 'id_outlet']].drop_duplicates(), on='no_hp', how='left')
         st.dataframe(merged_multi, use_container_width=True)
 
 else:
