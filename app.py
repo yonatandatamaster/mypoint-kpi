@@ -7,29 +7,32 @@ from datetime import datetime
 
 st.set_page_config(page_title="Outlet KPI Dashboard", layout="wide")
 
-# --- Custom week logic (WEEKNUM(..., 16) - Saturday as week start)
-def custom_week_number(date):
-    if pd.isnull(date):
-        return np.nan
-    first_day = datetime(date.year, 1, 1)
-    while first_day.weekday() != 5:  # Saturday
-        first_day += pd.Timedelta(days=1)
-    return ((date - first_day).days // 7) + 1
+# --- Built-in week mapping (based on your Date_week_tag.xlsx) ---
+WEEK_MAP = {
+    '2025-04-28': 18, '2025-04-29': 18, '2025-04-30': 18,
+    '2025-05-01': 18, '2025-05-02': 18, '2025-05-03': 18, '2025-05-04': 18,
+    '2025-05-05': 19, '2025-05-06': 19, '2025-05-07': 19,
+    '2025-05-08': 19, '2025-05-09': 19, '2025-05-10': 19, '2025-05-11': 19,
+    # Add more dates here if needed
+}
 
-# --- Fixed Database File ---
+# --- Fixed master database file name ---
 DB_FILE = "Master_Database_Outlet.xlsx"
 
 @st.cache_data
 def load_data(scan_file):
+    # Load Scan & DB
     df_scan = pd.read_excel(scan_file, sheet_name=None)
     df_db = pd.read_excel(DB_FILE, sheet_name=None)
 
     df_scan = df_scan[list(df_scan.keys())[0]]
     df_db = df_db[list(df_db.keys())[0]]
 
+    # Standardize column names
     df_scan.columns = df_scan.columns.str.strip().str.lower()
     df_db.columns = df_db.columns.str.strip().str.lower()
 
+    # Rename if needed
     df_scan = df_scan.rename(columns={
         'tanggal scan': 'tanggal_scan',
         'id outlet': 'id_outlet',
@@ -43,25 +46,27 @@ def load_data(scan_file):
         'dso': 'dso'
     })
 
+    # Preprocess
     df_scan['tanggal_scan'] = pd.to_datetime(df_scan['tanggal_scan'], errors='coerce')
-    df_scan['week_number'] = df_scan['tanggal_scan'].apply(custom_week_number)
+    df_scan['week_number'] = df_scan['tanggal_scan'].dt.strftime('%Y-%m-%d').map(WEEK_MAP)
     df_scan['id_outlet'] = df_scan['id_outlet'].astype(str).str.strip()
     df_scan['no_hp'] = df_scan['no_hp'].astype(str).str.strip()
     df_db['id_outlet'] = df_db['id_outlet'].astype(str).str.strip()
 
+    # Merge
     df_merged = pd.merge(df_db, df_scan, on='id_outlet', how='left')
     df_merged['is_active'] = df_merged['tanggal_scan'].notna()
 
     return df_merged
 
-# --- UI: File Upload ---
-st.sidebar.header("Upload Scan File")
+# --- Upload section ---
+st.sidebar.header("📂 Upload Scan File")
 scan_file = st.sidebar.file_uploader("Upload only the Scan File (.xlsx)", type=["xlsx"])
 
 if scan_file:
     df = load_data(scan_file)
 
-    # --- Filters ---
+    # --- Filters
     st.sidebar.header("🔍 Additional Filters")
     selected_dso = st.sidebar.selectbox("Filter by DSO", options=sorted(df['dso'].dropna().unique()))
     df = df[df['dso'] == selected_dso]
@@ -76,15 +81,17 @@ if scan_file:
     selected_pics = st.sidebar.multiselect("Select PIC(s)", options=sorted(df['pic'].dropna().unique()), default=sorted(df['pic'].dropna().unique()))
     df = df[df['pic'].isin(selected_pics)]
 
-    # --- Tabs ---
+    # --- Tabs
     tab1, tab2, tab3 = st.tabs(["📊 Dashboard Table", "📈 Trends & Charts", "📋 Multi-Outlet Scans"])
 
     with tab1:
         st.subheader("📌 Weekly Active % by PIC and Program")
 
+        # Total outlets per PIC/Program
         total_outlets = df.drop_duplicates(subset=['id_outlet', 'pic', 'program']) \
             .groupby(['pic', 'program'])['id_outlet'].count().reset_index(name='total_outlets')
 
+        # Weekly active scan count (distinct outlet+week)
         active_weekly = df[df['is_active']].drop_duplicates(subset=['id_outlet', 'week_number']) \
             .groupby(['pic', 'program', 'week_number'])['id_outlet'].count().reset_index(name='active_count')
 
@@ -104,7 +111,7 @@ if scan_file:
 
         st.dataframe(styled_df, use_container_width=True)
 
-        # Export
+        # Export button
         towrite = io.BytesIO()
         with pd.ExcelWriter(towrite, engine='xlsxwriter') as writer:
             pivot_df.to_excel(writer, index=False, sheet_name="Weekly KPI")
