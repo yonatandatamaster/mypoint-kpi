@@ -37,7 +37,6 @@ def highlight_low(val):
     except:
         return ''
 
-# Upload
 st.sidebar.header("📂 Upload Scan File")
 scan_file = st.sidebar.file_uploader("Upload Scan File (.xlsx)", type=["xlsx"])
 
@@ -92,18 +91,27 @@ if scan_file:
         st.subheader("📊 Weekly Unique Consumers per Outlet")
         df_weeks = df_filtered[df_filtered['week_number'].isin(selected_weeks)]
         df_unique = df_weeks[df_weeks['no_hp'].notna()]
-        grouped = df_unique.groupby(['week_number', 'pic', 'program', 'id_outlet'])['no_hp'].nunique().reset_index(name='unique_users')
-        pivot_unique = grouped.pivot_table(index=['pic', 'program', 'id_outlet'], columns='week_number', values='unique_users', fill_value=0).reset_index()
+        
+        # Weekly unique per outlet
+        weekly_unique = df_unique.groupby(['week_number', 'pic', 'program', 'id_outlet'])['no_hp'].nunique().reset_index(name='unique_users')
+        pivot_unique = weekly_unique.pivot_table(index=['pic', 'program', 'id_outlet'], columns='week_number', values='unique_users', fill_value=0).reset_index()
+        
+        # Total unique konsumen across all weeks
+        total_unique = df_unique.groupby(['id_outlet'])['no_hp'].nunique().reset_index(name='total_unique_konsumen')
+        pivot_unique = pd.merge(pivot_unique, total_unique, on='id_outlet', how='left')
+
         st.dataframe(pivot_unique, use_container_width=True)
 
     # --- Tab 2: DSO Summary Table ---
     with tab2:
         st.subheader("📊 Active % by DSO / Site")
-        df_active_check = df_filtered.copy()
-        df_active_check['scanned'] = df_active_check['tanggal_scan'].notna()
-        summary = df_active_check.groupby('dso').agg(
+        df_dso_filtered = df_filtered.copy()
+        df_dso_filtered['scanned'] = df_dso_filtered['tanggal_scan'].notna()
+
+        # Apply DSO + Program filters
+        summary = df_dso_filtered.groupby('dso').agg(
             total_outlets=('id_outlet', 'nunique'),
-            active_outlets=('id_outlet', lambda x: x[df_active_check['scanned']].nunique())
+            active_outlets=('id_outlet', lambda x: x[df_dso_filtered['scanned']].nunique())
         ).reset_index()
         summary['% active'] = (summary['active_outlets'] / summary['total_outlets'] * 100).round(1)
         st.dataframe(summary, use_container_width=True)
