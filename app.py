@@ -101,6 +101,19 @@ if scan_file:
         pivot_unique = pd.merge(pivot_unique, total_unique, on='id_outlet', how='left')
 
         st.dataframe(pivot_unique, use_container_width=True)
+        
+        # Excel download for unique konsumen
+        towrite1 = io.BytesIO()
+        with pd.ExcelWriter(towrite1, engine='xlsxwriter') as writer:
+            pivot_unique.to_excel(writer, index=False, sheet_name="Unique Konsumen")
+        st.download_button(
+            label="📥 Download Unique Konsumen",
+            data=towrite1.getvalue(),
+            file_name="unique_konsumen_report.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+
+        
 
     # --- Tab 2: DSO Summary Table ---
     with tab2:
