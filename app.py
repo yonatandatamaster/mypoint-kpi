@@ -6,7 +6,7 @@ import io
 
 st.set_page_config(page_title="Outlet KPI Dashboard", layout="wide")
 
-# --- Constants ---
+# File constants
 DB_FILE = "Master_Database_Outlet.xlsx"
 WEEK_TAG_FILE = "Date_week_tag.xlsx"
 
@@ -39,7 +39,7 @@ def highlight_low(val):
     except:
         return ''
 
-# --- Main App ---
+# Upload Scan File
 st.sidebar.header("📁 Upload Scan File")
 scan_file = st.sidebar.file_uploader("Upload only the Scan File (.xlsx)", type=["xlsx"])
 
@@ -47,7 +47,6 @@ if scan_file:
     df_db = load_database()
     week_map = load_week_tags()
 
-    # --- Load Scan File ---
     df_scan = pd.read_excel(scan_file, sheet_name=None)
     df_scan = df_scan[list(df_scan.keys())[0]]
     df_scan.columns = df_scan.columns.str.strip().str.lower()
@@ -61,10 +60,10 @@ if scan_file:
     df_scan['no_hp'] = df_scan['no_hp'].astype(str).str.strip()
     df_scan = pd.merge(df_scan, week_map, on='tanggal_scan', how='left')
 
-    # --- Merge and Filters ---
     df = pd.merge(df_db, df_scan, on='id_outlet', how='left')
     df['is_active'] = df['tanggal_scan'].notna()
 
+    # Sidebar filters
     st.sidebar.header("🔍 Filter Data")
     selected_dso = st.sidebar.selectbox("Filter by DSO", sorted(df['dso'].dropna().unique()))
     df = df[df['dso'] == selected_dso]
@@ -81,6 +80,7 @@ if scan_file:
     selected_pics = st.sidebar.multiselect("Select PIC(s)", options=all_pics, default=all_pics)
     df = df[df['pic'].isin(selected_pics)]
 
+    # Tabs
     tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
         "📊 Dashboard Table Unique Konsumen",
         "📊 DSO Summary Table",
@@ -90,7 +90,7 @@ if scan_file:
         "📋 Multi-Outlet Scans"
     ])
 
-    # --- Tab 1 ---
+    # Tab 1: Unique Konsumen
     with tab1:
         st.subheader("📊 Weekly Unique Consumers per Outlet")
         weekly_unique = df.dropna(subset=['no_hp']).groupby(['pic', 'program', 'id_outlet', 'week_number'])['no_hp'].nunique().reset_index(name='unique_konsumen')
@@ -104,7 +104,7 @@ if scan_file:
             pivot.to_excel(writer, index=False, sheet_name="Weekly Unique Konsumen")
         st.download_button("📥 Download Excel Report", data=towrite.getvalue(), file_name="unique_konsumen.xlsx")
 
-    # --- Tab 2 ---
+    # Tab 2: DSO Summary
     with tab2:
         st.subheader("📊 Active % by DSO / Site")
         total_outlets = df_db[df_db['dso'] == selected_dso].groupby(['dso', 'program'])['id_outlet'].nunique().reset_index(name='total_outlets')
@@ -115,22 +115,23 @@ if scan_file:
         styled_dso = pivot_dso.style.format({col: "{:.1f}%" for col in pivot_dso.columns[2:]}).applymap(highlight_low, subset=pd.IndexSlice[:, pivot_dso.columns[2:]])
         st.dataframe(styled_dso, use_container_width=True)
 
-    # --- Tab 3 ---
+    # Tab 3: Inactive Outlets (Filtered + Download)
     with tab3:
-        st.subheader("🚫 Outlets with Zero User Scans")
+        st.subheader("🚫 Outlets with Zero User Scans (per Program & PIC)")
         active_ids = df[df['is_active']]['id_outlet'].unique()
         inactive_df = df_db[~df_db['id_outlet'].isin(active_ids)]
         inactive_df = inactive_df[inactive_df['dso'] == selected_dso]
         inactive_df = inactive_df[inactive_df['program'].isin(selected_programs)]
         inactive_df = inactive_df[inactive_df['pic'].isin(selected_pics)]
-        st.dataframe(inactive_df[['pic', 'id_outlet', 'nama_outlet', 'program']], use_container_width=True)
+        display_cols = ['pic', 'id_outlet', 'nama_outlet', 'program']
+        st.dataframe(inactive_df[display_cols], use_container_width=True)
 
         towrite = io.BytesIO()
         with pd.ExcelWriter(towrite, engine='xlsxwriter') as writer:
-            inactive_df.to_excel(writer, index=False, sheet_name="Inactive Outlets")
+            inactive_df[display_cols].to_excel(writer, index=False, sheet_name="Inactive Outlets")
         st.download_button("📥 Download Inactive Outlets", data=towrite.getvalue(), file_name="inactive_outlets.xlsx")
 
-    # --- Tab 4 ---
+    # Tab 4: Weekly Active %
     with tab4:
         st.subheader("📌 Weekly Active % by PIC and Program")
         total_outlets = df_db[df_db['dso'] == selected_dso].groupby(['pic', 'program'])['id_outlet'].nunique().reset_index(name='total_outlets')
@@ -141,7 +142,7 @@ if scan_file:
         styled_df = pivot_df.style.format({col: "{:.1f}%" for col in pivot_df.columns[2:]}).applymap(highlight_low, subset=pd.IndexSlice[:, pivot_df.columns[2:]])
         st.dataframe(styled_df, use_container_width=True)
 
-    # --- Tab 5 ---
+    # Tab 5: Trend Charts
     with tab5:
         st.subheader("📈 Weekly Active % Trend by PIC")
         chart = alt.Chart(merged).mark_line(point=True).encode(
@@ -152,7 +153,7 @@ if scan_file:
         ).properties(width=800, height=400)
         st.altair_chart(chart, use_container_width=True)
 
-    # --- Tab 6 ---
+    # Tab 6: Multi-Outlet Scans
     with tab6:
         st.subheader("📋 Phone Numbers Scanning in Multiple Outlets")
         df_valid = df[df['no_hp'].notna()]
