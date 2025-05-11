@@ -17,13 +17,14 @@ def load_database():
     df_db.columns = df_db.columns.str.strip().str.lower()
     df_db = df_db.rename(columns={
         'id outlet': 'id_outlet',
-        'nama outlet': 'nama_outlet',
+        'nama outlet (dsca)': 'nama_outlet',  # ← fixed here
         'pic / promotor': 'pic',
         'program': 'program',
         'dso': 'dso'
     })
     df_db['id_outlet'] = df_db['id_outlet'].astype(str).str.strip()
     return df_db
+
 
 @st.cache_data
 def load_week_tags():
