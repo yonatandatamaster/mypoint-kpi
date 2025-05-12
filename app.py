@@ -91,19 +91,47 @@ if scan_file:
         "📋 Multi-Outlet Scans"
     ])
 
+
     # Tab 1: Unique Konsumen
     with tab1:
         st.subheader("📊 Weekly Unique Consumers per Outlet")
-        weekly_unique = df.dropna(subset=['no_hp']).groupby(['pic', 'program', 'id_outlet', 'week_number'])['no_hp'].nunique().reset_index(name='unique_konsumen')
-        pivot = weekly_unique.pivot_table(index=['pic', 'program', 'id_outlet'], columns='week_number', values='unique_konsumen', fill_value=0).reset_index()
-        total_unique = df.dropna(subset=['no_hp']).groupby(['id_outlet'])['no_hp'].nunique().reset_index(name='total_unique_konsumen')
+
+        weekly_unique = df.dropna(subset=['no_hp']).groupby(
+            ['pic', 'program', 'id_outlet', 'week_number']
+            )['no_hp'].nunique().reset_index(name='unique_konsumen')
+
+        pivot = weekly_unique.pivot_table(
+        index=['pic', 'program', 'id_outlet'],
+        columns='week_number',
+        values='unique_konsumen',
+        fill_value=0
+        ).reset_index()
+
+        total_unique = df.dropna(subset=['no_hp']).groupby(
+            ['id_outlet']
+            )['no_hp'].nunique().reset_index(name='total_unique_konsumen')
+
         pivot = pd.merge(pivot, total_unique, on='id_outlet', how='left')
+
+        # ✅ Merge nama_outlet from df_db
+        pivot = pd.merge(pivot, df_db[['id_outlet', 'nama_outlet']], on='id_outlet', how='left')
+
+        # Optional: Rearrange columns so nama_outlet appears next to id_outlet
+        cols = pivot.columns.tolist()
+        if 'nama_outlet' in cols:
+            idx = cols.index('id_outlet')
+            cols.insert(idx + 1, cols.pop(cols.index('nama_outlet')))
+            pivot = pivot[cols]
+
         st.dataframe(pivot, use_container_width=True)
 
         towrite = io.BytesIO()
         with pd.ExcelWriter(towrite, engine='xlsxwriter') as writer:
             pivot.to_excel(writer, index=False, sheet_name="Weekly Unique Konsumen")
         st.download_button("📥 Download Excel Report", data=towrite.getvalue(), file_name="unique_konsumen.xlsx")
+
+
+        
 
     # Tab 2: DSO Summary
     with tab2:
